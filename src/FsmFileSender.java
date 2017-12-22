@@ -1,12 +1,12 @@
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.SocketException;
+import java.io.*;
+import java.net.*;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
-class FsmFileSender {
+
+class FsmFileSender implements Runnable {
+
+    private final static int PORT = 10_000;
 
     // all states for this FSM
     enum State {
@@ -15,7 +15,7 @@ class FsmFileSender {
 
     // all messages/conditions which can occur
     enum Msg {
-        SEND_PKT, WAIT_FOR_DATA
+        SEND_PKT, WAIT_FOR_DATA, CORRECT_PACKET, BROKEN_PACKET, TIMEOUT
     }
 
     // current state of the FSM
@@ -33,23 +33,94 @@ class FsmFileSender {
         // define all valid state transitions for our state machine
         // (undefined transitions will be ignored)
         transition = new Transition[State.values().length][Msg.values().length];
-        transition[State.WAIT_0.ordinal()][Msg.SEND_PKT.ordinal()] = new SendPkt_0();
-        transition[State.WAIT_0.ordinal()][Msg.WAIT_FOR_DATA.ordinal()] = new WaitForData_0();
-        transition[State.WAIT_1.ordinal()][Msg.WAIT_FOR_DATA.ordinal()] = new WaitForData_1();
 
-                System.out.println("INFO FSM constructed, current state: " + currentState);
+
+        transition[State.WAIT_0.ordinal()][Msg.SEND_PKT.ordinal()] = new SendPkt();
+        transition[State.WAIT_1.ordinal()][Msg.SEND_PKT.ordinal()] = new SendPkt();
+
+        System.out.println("INFO FSM constructed, current state: " + currentState);
     }
+
+    @Override
+    public void run() {
+        File file = new File("C:/Users/soich/IdeaProjects/UDP_Datatransfer/src/" + dataName + ".txt");
+        ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(byteOut);
+        byte[] data = new byte[1200];
+        byte[] receiveData = new byte[15];
+        DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
+        DatagramPacket sendPacket = null;
+        boolean nameNotSend = true;
+
+        try {
+            DatagramSocket socket = new DatagramSocket();
+            FileInputStream fis = new FileInputStream(file);
+            BufferedInputStream bis = new BufferedInputStream(fis);
+            InetAddress ia = InetAddress.getLocalHost();
+            while (true) {
+                if (currentState.equals(State.WAIT_0) || currentState.equals(State.WAIT_1)) {
+                    if (nameNotSend) {
+                        System.out.println("First send the Name");
+                        Checksum checksum = new CRC32();
+                        checksum.update(dataName.getBytes(), 0, dataName.length());
+                        int checksumValue = (int) checksum.getValue();
+
+                        out.write(0);
+                        out.write(checksumValue);
+                        out.write(dataName.length());
+                        out.write(dataName.getBytes());
+
+
+                        byte packetData[] = byteOut.toByteArray();
+                        sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
+                        nameNotSend = false;
+                    } else {
+                        int bytesAmount = 0;
+                        if ((bytesAmount = bis.read(data, 0, 1200)) > 0) {
+
+                            byte packetData[] = buildPacket(currentState, data, bytesAmount);
+                            sendPacket = new DatagramPacket(packetData, packetData.length);
+                        }
+                    }
+                    processMsg(Msg.SEND_PKT, sendPacket, socket);
+                    socket.setSoTimeout(10_000);
+                } else if (currentState.equals(State.WAIT_FOR_ACK0) || currentState.equals(State.WAIT_FOR_ACK1)) {
+
+                    byte[] pkt = new byte[9];
+                    DatagramSocket receiverSocket = new DatagramSocket(9000);
+                    receiverSocket.setSoTimeout(10_000);
+                    DatagramPacket ackpkt = new DatagramPacket(pkt, pkt.length);
+                    System.out.println("Waiting for ACK...");
+
+                    receiverSocket.receive(ackpkt);
+                    System.out.println("received ack");
+                }
+            }
+
+        } catch (SocketException e) {
+            e.printStackTrace();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+
+    }
+
 
     /**
      * Process a message (a condition has occurred).
      *
      * @param input Message or condition that has occurred.
      */
-    public void processMsg(Msg input, byte[] data, DatagramSocket socket) {
+    public void processMsg(Msg input, DatagramPacket packet, DatagramSocket socket) {
         System.out.println("INFO Received " + input + " in state " + currentState);
         Transition trans = transition[currentState.ordinal()][input.ordinal()];
         if (trans != null) {
-            currentState = trans.execute(input, data, socket);
+            currentState = trans.execute(input, packet, socket);
         }
         System.out.println("INFO State: " + currentState);
     }
@@ -60,91 +131,65 @@ class FsmFileSender {
      * to be performed whenever this transition occurs.
      */
     abstract class Transition {
-        abstract public State execute(Msg input, byte[] data, DatagramSocket socket);
+        abstract public State execute(Msg input, DatagramPacket packet, DatagramSocket socket);
     }
 
-    class SendPkt_0 extends Transition {
-        private final static int PORT = 10000;
-        ByteArrayOutputStream bOut = new ByteArrayOutputStream();
-
+    class SendPkt extends Transition {
         @Override
-        public State execute(Msg input, byte[] data, DatagramSocket socket) {
-
-            Checksum checksum = new CRC32();
-            checksum.update(data, 0, data.length);
-            int checksumValue = (int) checksum.getValue();
-            System.out.println(checksumValue);
+        public State execute(Msg input, DatagramPacket packet, DatagramSocket socket) {
+            System.out.println("schicken wir was raus?");
             try {
 
-                bOut.write(0);
-                bOut.write(checksumValue);
-                bOut.write(data);
+                socket.send(packet);
 
-                byte packetData[] = bOut.toByteArray();
-                DatagramPacket sendPacket = new DatagramPacket(packetData, packetData.length);
-
-                //socket.send(sendPacket);
-            } catch (SocketException e) {
-                e.printStackTrace();
             } catch (IOException e) {
                 e.printStackTrace();
             }
-
-            System.out.println("Packet is sended");
-            return State.WAIT_FOR_ACK0;
-        }
-    }
-
-    class SendPkt_1 extends Transition {
-        private final static int PORT = 10000;
-        ByteArrayOutputStream bOut = new ByteArrayOutputStream();
-
-        @Override
-        public State execute(Msg input, byte[] data, DatagramSocket socket) {
-            Checksum checksum = new CRC32();
-            checksum.update(data, 0, data.length);
-            int checksumValue = (int) checksum.getValue();
-            System.out.println(checksumValue);
-            try {
-
-                bOut.write(1);
-                bOut.write(checksumValue);
-                bOut.write(data);
-
-                byte packetData[] = bOut.toByteArray();
-                DatagramPacket sendPacket = new DatagramPacket(packetData, packetData.length);
-
-                socket.send(sendPacket);
-            } catch (SocketException e) {
-                e.printStackTrace();
-            } catch (IOException e) {
-                e.printStackTrace();
+            if (currentState == State.WAIT_0) {
+                System.out.println("Packet send from wait 0");
+                return State.WAIT_FOR_ACK0;
+            } else if (currentState == State.WAIT_FOR_ACK0) {
+                System.out.println("Wait in Ack 0");
+                return currentState;
+            } else if (currentState == State.WAIT_1) {
+                System.out.println("Packet send from wait 1");
+                return State.WAIT_FOR_ACK1;
+            } else {
+                System.out.println("Wait in Ack 1");
+                return currentState;
             }
 
-            System.out.println("Packet is sended");
-            return State.WAIT_FOR_ACK0;
-        }
 
-
-    }
-
-    class WaitForData_0 extends Transition {
-
-        @Override
-        public State execute(Msg input, byte[] data, DatagramSocket socket) {
-            System.out.println("There is no data to send");
-            return State.WAIT_0;
         }
     }
 
-    class WaitForData_1 extends Transition {
+    public byte[] buildPacket(State currentState, byte[] data, int bytesAmount) throws IOException {
+        ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(byteOut);
+        Checksum checksum = new CRC32();
+        checksum.update(data, 0, bytesAmount);
+        int checksumValue = (int) checksum.getValue();
 
-        @Override
-        public State execute(Msg input, byte[] data, DatagramSocket socket) {
-            System.out.println("There is no data to send");
-            return State.WAIT_1;
+        if (currentState == State.WAIT_0) {
+            out.write(0);
+        } else if (currentState == State.WAIT_1) {
+            out.write(1);
         }
+
+        out.write(checksumValue);
+        out.write(bytesAmount);
+        out.write(data);
+
+        byte packetData[] = byteOut.toByteArray();
+
+        return packetData;
     }
 
+    public boolean checkReceivePacket(DatagramPacket receivePacket){
+        boolean isOkay = false;
 
+        return isOkay;
+    }
 }
+
+
