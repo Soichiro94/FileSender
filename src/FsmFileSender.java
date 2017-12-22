@@ -62,16 +62,31 @@ class FsmFileSender implements Runnable {
                     if (nameNotSend) {
                         System.out.println("First send the Name");
                         Checksum checksum = new CRC32();
-                        checksum.update(dataName.getBytes(), 0, dataName.length());
+                        byte[] nameByte = new byte[1200];
+                        int n = dataName.length();
+                        int nameByteLength = 0;
+                        for(int i = 0; i<n;i++){
+                            char c = dataName.charAt(i);
+                            nameByte[i] = (byte) c;
+                            nameByteLength++;
+                            System.out.println(nameByte[i]);
+                        }
+
+
+
+
+                        checksum.update(nameByte, 0, nameByteLength);
                         int checksumValue = (int) checksum.getValue();
 
-                        out.write(0);
-                        out.write(checksumValue);
-                        out.write(dataName.length());
-                        out.write(dataName.getBytes());
+                        System.out.println(checksumValue);
 
+                        out.write(0);
+                        out.writeLong(checksum.getValue());
+                        out.writeInt(nameByteLength);
+                        out.write(nameByte);
 
                         byte packetData[] = byteOut.toByteArray();
+                        System.out.println(packetData.length);
                         sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
                         nameNotSend = false;
                     } else {
