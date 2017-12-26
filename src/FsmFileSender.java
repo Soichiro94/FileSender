@@ -39,6 +39,9 @@ class FsmFileSender implements Runnable {
         transition[State.WAIT_0.ordinal()][Msg.SEND_PKT.ordinal()] = new SendPkt();
         transition[State.WAIT_1.ordinal()][Msg.SEND_PKT.ordinal()] = new SendPkt();
 
+        transition[State.WAIT_FOR_ACK0.ordinal()][Msg.CORRECT_PACKET.ordinal()] = new StopTimer();
+        transition[State.WAIT_FOR_ACK1.ordinal()][Msg.CORRECT_PACKET.ordinal()] = new StopTimer();
+
         System.out.println("INFO FSM constructed, current state: " + currentState);
     }
 
@@ -52,12 +55,13 @@ class FsmFileSender implements Runnable {
         boolean nameNotSend = true;
 
         try {
-            DatagramSocket socket = new DatagramSocket();
+
             DatagramSocket receiverSocket = new DatagramSocket(9000);
             FileInputStream fis = new FileInputStream(file);
             BufferedInputStream bis = new BufferedInputStream(fis);
             InetAddress ia = InetAddress.getLocalHost();
             while (true) {
+                DatagramSocket socket = new DatagramSocket();
                 if (currentState.equals(State.WAIT_0) || currentState.equals(State.WAIT_1)) {
                     if (nameNotSend) {
                         System.out.println("First send the Name");
@@ -82,27 +86,52 @@ class FsmFileSender implements Runnable {
 
                         byte packetData[] = byteOut.toByteArray();
                         sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
-
                         nameNotSend = false;
                     } else {
                         System.out.println("send data, no name");
                         int bytesAmount = 0;
                         if ((bytesAmount = bis.read(data, 0, 1200)) > 0) {
+                            System.out.println("bauen ein neues paket");
 
                             byte packetData[] = buildPacket(currentState, data, bytesAmount);
-                            sendPacket = new DatagramPacket(packetData, packetData.length);
+                            sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
+
                         }
                     }
                     processMsg(Msg.SEND_PKT, sendPacket, socket);
                     socket.setSoTimeout(10_000);
                 } else if (currentState.equals(State.WAIT_FOR_ACK0) || currentState.equals(State.WAIT_FOR_ACK1)) {
+
+                    // toDo so bauen das es die richtigen states erkennt
+                    boolean correct = false;
                     byte[] pkt = new byte[9];
                     receiverSocket.setSoTimeout(10_000);
                     DatagramPacket ackpkt = new DatagramPacket(pkt, pkt.length);
                     System.out.println("Waiting for ACK...");
 
                     receiverSocket.receive(ackpkt);
-                    System.out.println("received ack");
+
+                    if (currentState.equals(State.WAIT_FOR_ACK0)) {
+                        correct = extractAndCheck(pkt, ackpkt, 0);
+                        if (correct) {
+                            System.out.println("das paket passt");
+                            processMsg(Msg.CORRECT_PACKET, ackpkt, receiverSocket);
+                        } else {
+                            System.out.println("das paket passt nicht");
+                            //todo send packet again
+                        }
+                    } else {
+                        correct = extractAndCheck(pkt, ackpkt, 1);
+                        if (correct) {
+                            System.out.println("das paket passt");
+                            processMsg(Msg.CORRECT_PACKET, ackpkt, receiverSocket);
+                        } else {
+                            System.out.println("das paket passt nicht");
+                            //todo send packet again
+                        }
+                    }
+
+
                 }
             }
 
@@ -125,7 +154,7 @@ class FsmFileSender implements Runnable {
      *
      * @param input Message or condition that has occurred.
      */
-    public void processMsg(Msg input, DatagramPacket packet, DatagramSocket socket) {
+    public void processMsg(Msg input, DatagramPacket packet, DatagramSocket socket) throws SocketException {
         System.out.println("INFO Received " + input + " in state " + currentState);
         Transition trans = transition[currentState.ordinal()][input.ordinal()];
         if (trans != null) {
@@ -140,7 +169,7 @@ class FsmFileSender implements Runnable {
      * to be performed whenever this transition occurs.
      */
     abstract class Transition {
-        abstract public State execute(Msg input, DatagramPacket packet, DatagramSocket socket);
+        abstract public State execute(Msg input, DatagramPacket packet, DatagramSocket socket) throws SocketException;
     }
 
     class SendPkt extends Transition {
@@ -172,6 +201,23 @@ class FsmFileSender implements Runnable {
         }
     }
 
+    class StopTimer extends Transition {
+        @Override
+        public State execute(Msg input, DatagramPacket packet, DatagramSocket socket) {
+            try {
+                socket.setSoTimeout(0);
+            } catch (SocketException e) {
+                e.printStackTrace();
+            }
+            System.out.println("Timer wurde gestoppt");
+            if(currentState.equals(State.WAIT_FOR_ACK0)){
+                return State.WAIT_1;
+            }else{
+                return State.WAIT_0;
+            }
+        }
+    }
+
     public byte[] buildPacket(State currentState, byte[] data, int bytesAmount) throws IOException {
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
@@ -185,41 +231,52 @@ class FsmFileSender implements Runnable {
             out.write(1);
         }
 
-        out.write(checksumValue);
-        out.write(bytesAmount);
+        out.writeLong(checksumValue);
+        out.writeInt(bytesAmount);
         out.write(data);
-
+        System.out.println(checksumValue);
         byte packetData[] = byteOut.toByteArray();
 
         return packetData;
     }
 
-    public boolean checkReceivePacket(DatagramPacket receivePacket) {
-        boolean isOkay = false;
-
-        return isOkay;
-    }
-
-    private void extractPkt(byte[] data, DatagramPacket packet) throws IOException {
+    private boolean extractAndCheck(byte[] data, DatagramPacket packet, int number) throws IOException {
+        byte[] numberByte = new byte[1];
         System.out.println("Start");
-
         int ack;
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(packet.getData()));
-
-        // Read SEQ 0/1
+        // Read ACK 0/1
         ack = in.read();
         System.out.println("ack " + ack);
+        if (ack != number) {
+            System.out.println("das ack ist leider falsch");
+            return false;
+        } else {
 
-        // Combine Content Length Bytes
-        byte[] check = new byte[8];
-        for (int i = 0; i < check.length; i++) {
-            check[i] = in.readByte();
+            // Combine checksum bytes
+            byte[] check = new byte[8];
+            for (int i = 0; i < check.length; i++) {
+                check[i] = in.readByte();
+                System.out.println("checksum (for loop) " + check[i]);
+
+            }
+            ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
+            buffer.put(check);
+            buffer.flip();
+            long checksum = buffer.getLong();
+
+            numberByte[0] = (byte) number;
+            Checksum checker = new CRC32();
+            checker.update(numberByte, 0, 1);
+
+            System.out.println("checksum " + checksum);
+            System.out.println("checker " + checker.getValue());
+
+            if (checksum != checker.getValue()) {
+                return false;
+            }
+            return true;
         }
-        ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
-        buffer.put(check);
-        buffer.flip();
-        long checksum = buffer.getLong();
-        System.out.println("checksum " + checksum);
     }
 }
 
