@@ -1,5 +1,6 @@
 import java.io.*;
 import java.net.*;
+import java.nio.ByteBuffer;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
@@ -47,13 +48,12 @@ class FsmFileSender implements Runnable {
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
         byte[] data = new byte[1200];
-        byte[] receiveData = new byte[15];
-        DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
         DatagramPacket sendPacket = null;
         boolean nameNotSend = true;
 
         try {
             DatagramSocket socket = new DatagramSocket();
+            DatagramSocket receiverSocket = new DatagramSocket(9000);
             FileInputStream fis = new FileInputStream(file);
             BufferedInputStream bis = new BufferedInputStream(fis);
             InetAddress ia = InetAddress.getLocalHost();
@@ -65,20 +65,15 @@ class FsmFileSender implements Runnable {
                         byte[] nameByte = new byte[1200];
                         int n = dataName.length();
                         int nameByteLength = 0;
-                        for(int i = 0; i<n;i++){
+                        for (int i = 0; i < n; i++) {
                             char c = dataName.charAt(i);
                             nameByte[i] = (byte) c;
                             nameByteLength++;
-                            System.out.println(nameByte[i]);
+
                         }
 
-
-
-
                         checksum.update(nameByte, 0, nameByteLength);
-                        int checksumValue = (int) checksum.getValue();
-
-                        System.out.println(checksumValue);
+                        System.out.println(checksum.getValue());
 
                         out.write(0);
                         out.writeLong(checksum.getValue());
@@ -86,10 +81,11 @@ class FsmFileSender implements Runnable {
                         out.write(nameByte);
 
                         byte packetData[] = byteOut.toByteArray();
-                        System.out.println(packetData.length);
                         sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
+
                         nameNotSend = false;
                     } else {
+                        System.out.println("send data, no name");
                         int bytesAmount = 0;
                         if ((bytesAmount = bis.read(data, 0, 1200)) > 0) {
 
@@ -100,9 +96,7 @@ class FsmFileSender implements Runnable {
                     processMsg(Msg.SEND_PKT, sendPacket, socket);
                     socket.setSoTimeout(10_000);
                 } else if (currentState.equals(State.WAIT_FOR_ACK0) || currentState.equals(State.WAIT_FOR_ACK1)) {
-
                     byte[] pkt = new byte[9];
-                    DatagramSocket receiverSocket = new DatagramSocket(9000);
                     receiverSocket.setSoTimeout(10_000);
                     DatagramPacket ackpkt = new DatagramPacket(pkt, pkt.length);
                     System.out.println("Waiting for ACK...");
@@ -200,10 +194,32 @@ class FsmFileSender implements Runnable {
         return packetData;
     }
 
-    public boolean checkReceivePacket(DatagramPacket receivePacket){
+    public boolean checkReceivePacket(DatagramPacket receivePacket) {
         boolean isOkay = false;
 
         return isOkay;
+    }
+
+    private void extractPkt(byte[] data, DatagramPacket packet) throws IOException {
+        System.out.println("Start");
+
+        int ack;
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(packet.getData()));
+
+        // Read SEQ 0/1
+        ack = in.read();
+        System.out.println("ack " + ack);
+
+        // Combine Content Length Bytes
+        byte[] check = new byte[8];
+        for (int i = 0; i < check.length; i++) {
+            check[i] = in.readByte();
+        }
+        ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
+        buffer.put(check);
+        buffer.flip();
+        long checksum = buffer.getLong();
+        System.out.println("checksum " + checksum);
     }
 }
 
