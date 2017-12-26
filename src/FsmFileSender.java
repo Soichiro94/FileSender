@@ -222,20 +222,25 @@ class FsmFileSender implements Runnable {
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
         Checksum checksum = new CRC32();
+
+
         checksum.update(data, 0, bytesAmount);
         int checksumValue = (int) checksum.getValue();
-
+        System.out.println("checksum of send data:" +checksum.getValue());
         if (currentState == State.WAIT_0) {
             out.write(0);
         } else if (currentState == State.WAIT_1) {
             out.write(1);
         }
 
+        for(int i = 0; i < 10;i++){
+            System.out.println(data[i]);
+        }
         out.writeLong(checksumValue);
         out.writeInt(bytesAmount);
         out.write(data);
-        System.out.println(checksumValue);
         byte packetData[] = byteOut.toByteArray();
+
 
         return packetData;
     }
@@ -266,13 +271,13 @@ class FsmFileSender implements Runnable {
             long checksum = buffer.getLong();
 
             numberByte[0] = (byte) number;
-            Checksum checker = new CRC32();
-            checker.update(numberByte, 0, 1);
+            Checksum ackCheck = new CRC32();
+            ackCheck.update(numberByte, 0, 1);
 
             System.out.println("checksum " + checksum);
-            System.out.println("checker " + checker.getValue());
+            System.out.println("checker " + ackCheck.getValue());
 
-            if (checksum != checker.getValue()) {
+            if (checksum != ackCheck.getValue()) {
                 return false;
             }
             return true;
