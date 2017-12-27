@@ -65,7 +65,7 @@ class FsmFileSender implements Runnable {
                 if (currentState.equals(State.WAIT_0) || currentState.equals(State.WAIT_1)) {
                     if (nameNotSend) {
                         System.out.println("First send the Name");
-                        Checksum checksum = new CRC32();
+                        CRC32 checksum = new CRC32();
                         byte[] nameByte = new byte[1200];
                         int n = dataName.length();
                         int nameByteLength = 0;
@@ -75,7 +75,7 @@ class FsmFileSender implements Runnable {
                             nameByteLength++;
 
                         }
-
+                        checksum.reset();
                         checksum.update(nameByte, 0, nameByteLength);
                         System.out.println(checksum.getValue());
 
@@ -221,9 +221,9 @@ class FsmFileSender implements Runnable {
     public byte[] buildPacket(State currentState, byte[] data, int bytesAmount) throws IOException {
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
-        Checksum checksum = new CRC32();
+        CRC32 checksum = new CRC32();
 
-
+        checksum.reset();
         checksum.update(data, 0, bytesAmount);
         int checksumValue = (int) checksum.getValue();
         System.out.println("checksum of send data:" +checksum.getValue());
@@ -271,7 +271,9 @@ class FsmFileSender implements Runnable {
             long checksum = buffer.getLong();
 
             numberByte[0] = (byte) number;
-            Checksum ackCheck = new CRC32();
+            CRC32 ackCheck = new CRC32();
+
+            ackCheck.reset();
             ackCheck.update(numberByte, 0, 1);
 
             System.out.println("checksum " + checksum);
