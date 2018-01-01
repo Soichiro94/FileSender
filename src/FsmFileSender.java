@@ -1,6 +1,7 @@
 import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
+import java.util.concurrent.TimeoutException;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
@@ -42,12 +43,19 @@ class FsmFileSender implements Runnable {
         transition[State.WAIT_FOR_ACK0.ordinal()][Msg.CORRECT_PACKET.ordinal()] = new StopTimer();
         transition[State.WAIT_FOR_ACK1.ordinal()][Msg.CORRECT_PACKET.ordinal()] = new StopTimer();
 
+        transition[State.WAIT_FOR_ACK0.ordinal()][Msg.BROKEN_PACKET.ordinal()] = new Wait();
+        transition[State.WAIT_FOR_ACK1.ordinal()][Msg.BROKEN_PACKET.ordinal()] = new Wait();
+
+        transition[State.WAIT_FOR_ACK0.ordinal()][Msg.TIMEOUT.ordinal()] = new ResendPacket();
+        transition[State.WAIT_FOR_ACK1.ordinal()][Msg.TIMEOUT.ordinal()] = new ResendPacket();
+
         System.out.println("INFO FSM constructed, current state: " + currentState);
     }
 
     @Override
     public void run() {
-        File file = new File("C:/Users/soich/IdeaProjects/UDP_Datatransfer/src/" + dataName + ".txt");
+
+        File file = new File("C:/Users/soich/IdeaProjects/FileSender/src/" + dataName + ".txt");
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
         byte[] data = new byte[1200];
@@ -92,7 +100,6 @@ class FsmFileSender implements Runnable {
                         int bytesAmount = 0;
                         if ((bytesAmount = bis.read(data, 0, 1200)) > 0) {
                             System.out.println("bauen ein neues paket");
-
                             byte packetData[] = buildPacket(currentState, data, bytesAmount);
                             sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
 
@@ -100,38 +107,35 @@ class FsmFileSender implements Runnable {
                     }
                     processMsg(Msg.SEND_PKT, sendPacket, socket);
                     socket.setSoTimeout(10_000);
+
                 } else if (currentState.equals(State.WAIT_FOR_ACK0) || currentState.equals(State.WAIT_FOR_ACK1)) {
+                    try {
+                        // toDo so bauen das es die richtigen states erkennt
+                        int number = 0;
+                        boolean correct = false;
+                        byte[] pkt = new byte[9];
+                        receiverSocket.setSoTimeout(10_000);
+                        DatagramPacket ackpkt = new DatagramPacket(pkt, pkt.length);
+                        System.out.println("Waiting for ACK...");
 
-                    // toDo so bauen das es die richtigen states erkennt
-                    boolean correct = false;
-                    byte[] pkt = new byte[9];
-                    receiverSocket.setSoTimeout(10_000);
-                    DatagramPacket ackpkt = new DatagramPacket(pkt, pkt.length);
-                    System.out.println("Waiting for ACK...");
-
-                    receiverSocket.receive(ackpkt);
-
-                    if (currentState.equals(State.WAIT_FOR_ACK0)) {
-                        correct = extractAndCheck(pkt, ackpkt, 0);
+                        receiverSocket.receive(ackpkt);
+                        if (currentState.equals(State.WAIT_FOR_ACK0)) {
+                            number = 0;
+                        } else if (currentState.equals(State.WAIT_FOR_ACK1)) {
+                            number = 1;
+                        }
+                        correct = extractAndCheck(pkt, ackpkt, number);
                         if (correct) {
                             System.out.println("das paket passt");
                             processMsg(Msg.CORRECT_PACKET, ackpkt, receiverSocket);
                         } else {
                             System.out.println("das paket passt nicht");
-                            //todo send packet again
+                            processMsg(Msg.BROKEN_PACKET, ackpkt, receiverSocket);
                         }
-                    } else {
-                        correct = extractAndCheck(pkt, ackpkt, 1);
-                        if (correct) {
-                            System.out.println("das paket passt");
-                            processMsg(Msg.CORRECT_PACKET, ackpkt, receiverSocket);
-                        } else {
-                            System.out.println("das paket passt nicht");
-                            //todo send packet again
-                        }
+                    } catch (SocketTimeoutException ex) {
+                        System.out.println("we caught a timeout");
+                        processMsg(Msg.TIMEOUT, sendPacket, socket);
                     }
-
-
                 }
             }
 
@@ -210,11 +214,32 @@ class FsmFileSender implements Runnable {
                 e.printStackTrace();
             }
             System.out.println("Timer wurde gestoppt");
-            if(currentState.equals(State.WAIT_FOR_ACK0)){
+            if (currentState.equals(State.WAIT_FOR_ACK0)) {
                 return State.WAIT_1;
-            }else{
+            } else {
                 return State.WAIT_0;
             }
+        }
+    }
+
+    class ResendPacket extends Transition {
+        @Override
+        public State execute(Msg input, DatagramPacket packet, DatagramSocket socket) {
+            try {
+                socket.send(packet);
+                socket.setSoTimeout(10000);
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return currentState;
+        }
+    }
+
+    class Wait extends Transition {
+        @Override
+        public State execute(Msg input, DatagramPacket packet, DatagramSocket socket) {
+            return currentState;
         }
     }
 
@@ -225,15 +250,15 @@ class FsmFileSender implements Runnable {
 
         checksum.reset();
         checksum.update(data, 0, bytesAmount);
-        int checksumValue = (int) checksum.getValue();
-        System.out.println("checksum of send data:" +checksum.getValue());
+        long checksumValue = checksum.getValue();
+        System.out.println("checksum of send data:" + checksum.getValue());
         if (currentState == State.WAIT_0) {
             out.write(0);
         } else if (currentState == State.WAIT_1) {
             out.write(1);
         }
 
-        for(int i = 0; i < 10;i++){
+        for (int i = 0; i < 10; i++) {
             System.out.println(data[i]);
         }
         out.writeLong(checksumValue);
