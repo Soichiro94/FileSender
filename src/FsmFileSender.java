@@ -55,7 +55,7 @@ class FsmFileSender implements Runnable {
     @Override
     public void run() {
 
-        File file = new File("C:/Users/soich/IdeaProjects/FileSender/src/" + dataName + ".txt");
+        File file = new File(dataName);
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
         byte[] data = new byte[1200];

@@ -3,6 +3,15 @@ import java.net.SocketException;
 public class Main {
 
     public static void main(String[] args) throws SocketException {
-        new Thread(new FsmFileSender("sendTest","localhost")).start();
+
+        /*
+         The following test files can be used:
+                -   test_text.txt
+                -   test_image.jpg
+                -   test_music.MP3
+         */
+
+
+        new Thread(new FsmFileSender("test_text.txt","localhost")).start();
     }
 }
