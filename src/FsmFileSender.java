@@ -54,7 +54,6 @@ class FsmFileSender implements Runnable {
 
     @Override
     public void run() {
-
         File file = new File(dataName);
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
@@ -103,8 +102,12 @@ class FsmFileSender implements Runnable {
                             byte packetData[] = buildPacket(currentState, data, bytesAmount);
                             sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
 
+                        }else{
+                            System.out.println("WIR SIND AM ENDE DES PAKETES");
+                            break;
                         }
                     }
+
                     processMsg(Msg.SEND_PKT, sendPacket, socket);
                     socket.setSoTimeout(10_000);
 
@@ -252,6 +255,7 @@ class FsmFileSender implements Runnable {
         checksum.update(data, 0, bytesAmount);
         long checksumValue = checksum.getValue();
         System.out.println("checksum of send data:" + checksum.getValue());
+        System.out.println(currentState);
         if (currentState == State.WAIT_0) {
             out.write(0);
         } else if (currentState == State.WAIT_1) {
