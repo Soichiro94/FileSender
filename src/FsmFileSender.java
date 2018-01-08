@@ -9,6 +9,9 @@ import java.util.zip.Checksum;
 class FsmFileSender implements Runnable {
 
     private final static int PORT = 10_000;
+    private long sendTime = 0;
+    private long receiveTime = 0;
+    private int rtt = 0;
 
     // all states for this FSM
     enum State {
@@ -107,9 +110,13 @@ class FsmFileSender implements Runnable {
                             break;
                         }
                     }
-
                     processMsg(Msg.SEND_PKT, sendPacket, socket);
-                    socket.setSoTimeout(10_000);
+                    if(rtt == 0) {
+                        socket.setSoTimeout(1_000);
+                    }
+                    else{
+                        socket.setSoTimeout(rtt);
+                    }
 
                 } else if (currentState.equals(State.WAIT_FOR_ACK0) || currentState.equals(State.WAIT_FOR_ACK1)) {
                     try {
@@ -117,11 +124,29 @@ class FsmFileSender implements Runnable {
                         int number = 0;
                         boolean correct = false;
                         byte[] pkt = new byte[9];
-                        receiverSocket.setSoTimeout(10_000);
+
+
+                        if(rtt == 0) {
+                            receiverSocket.setSoTimeout(1_000);
+                        }
+                        else{
+                            receiverSocket.setSoTimeout(rtt);
+                        }
+
+
                         DatagramPacket ackpkt = new DatagramPacket(pkt, pkt.length);
                         System.out.println("Waiting for ACK...");
 
                         receiverSocket.receive(ackpkt);
+
+
+                        receiveTime = System.currentTimeMillis();
+                        rtt = (int)(2 * (receiveTime - sendTime) + 100);
+                        System.out.println("SendTime: " + sendTime);
+                        System.out.println("ReceiveTime: " + receiveTime);
+                        System.out.println("RTT: " + rtt);
+
+
                         if (currentState.equals(State.WAIT_FOR_ACK0)) {
                             number = 0;
                         } else if (currentState.equals(State.WAIT_FOR_ACK1)) {
@@ -186,6 +211,7 @@ class FsmFileSender implements Runnable {
             try {
 
                 socket.send(packet);
+                sendTime = System.currentTimeMillis();
 
             } catch (IOException e) {
                 e.printStackTrace();
@@ -230,7 +256,13 @@ class FsmFileSender implements Runnable {
         public State execute(Msg input, DatagramPacket packet, DatagramSocket socket) {
             try {
                 socket.send(packet);
-                socket.setSoTimeout(10000);
+                sendTime = System.currentTimeMillis();
+                if(rtt == 0) {
+                    socket.setSoTimeout(1_000);
+                }
+                else{
+                    socket.setSoTimeout(rtt);
+                }
 
             } catch (IOException e) {
                 e.printStackTrace();
