@@ -1,9 +1,8 @@
 import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
-import java.util.concurrent.TimeoutException;
 import java.util.zip.CRC32;
-import java.util.zip.Checksum;
+
 
 
 class FsmFileSender implements Runnable {
@@ -12,6 +11,7 @@ class FsmFileSender implements Runnable {
     private long sendTime = 0;
     private long receiveTime = 0;
     private int rtt = 0;
+    private InetAddress ia;
 
     // all states for this FSM
     enum State {
@@ -57,7 +57,11 @@ class FsmFileSender implements Runnable {
 
     @Override
     public void run() {
+
+        long startTime = System.currentTimeMillis();
+
         File file = new File(dataName);
+        System.out.println(file.length());
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
         byte[] data = new byte[1200];
@@ -65,11 +69,18 @@ class FsmFileSender implements Runnable {
         boolean nameNotSend = true;
 
         try {
+            if(receiverName.equals("localhost")){
+                ia = InetAddress.getLocalHost();
+            }
+            else{
+                ia = InetAddress.getByName("10.179.13.224");
+            }
+
 
             DatagramSocket receiverSocket = new DatagramSocket(9000);
             FileInputStream fis = new FileInputStream(file);
             BufferedInputStream bis = new BufferedInputStream(fis);
-            InetAddress ia = InetAddress.getLocalHost();
+
             while (true) {
                 DatagramSocket socket = new DatagramSocket();
                 if (currentState.equals(State.WAIT_0) || currentState.equals(State.WAIT_1)) {
@@ -107,6 +118,15 @@ class FsmFileSender implements Runnable {
 
                         }else{
                             System.out.println("WIR SIND AM ENDE DES PAKETES");
+                            System.out.println();
+                            long endTime = System.currentTimeMillis();
+                            double throughputTime = (endTime - startTime)/1000;
+                            double sizeMBit = (file.length() * 8) / 1_000_000;
+                            System.out.println("###########################################################");
+                            System.out.println("####  We send "+ file.length() +" byte of data");
+                            System.out.println("####  In "+ throughputTime +" seconds");
+                            System.out.println("####  So the throughput is "+ sizeMBit/throughputTime+" MBit/s");
+                            System.out.println("###########################################################");
                             break;
                         }
                     }
@@ -141,7 +161,7 @@ class FsmFileSender implements Runnable {
 
 
                         receiveTime = System.currentTimeMillis();
-                        rtt = (int)(2 * (receiveTime - sendTime) + 100);
+                        rtt = (int)(2 * (receiveTime - sendTime) + (rtt/2));
                         System.out.println("SendTime: " + sendTime);
                         System.out.println("ReceiveTime: " + receiveTime);
                         System.out.println("RTT: " + rtt);

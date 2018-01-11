@@ -12,6 +12,6 @@ public class Main {
          */
 
 
-        new Thread(new FsmFileSender("test_text.txt","localhost")).start();
+        new Thread(new FsmFileSender("test_image.jpg","mark")).start();
     }
 }
