@@ -12,6 +12,9 @@ class FsmFileSender implements Runnable {
     private long receiveTime = 0;
     private int rtt = 0;
     private InetAddress ia;
+    private byte[] data = new byte[1200];
+    private byte[] nameByte = new byte[1200];
+    private byte[] pkt = new byte[9];
 
     // all states for this FSM
     enum State {
@@ -64,7 +67,6 @@ class FsmFileSender implements Runnable {
         System.out.println(file.length());
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
-        byte[] data = new byte[1200];
         DatagramPacket sendPacket = null;
         boolean nameNotSend = true;
 
@@ -76,18 +78,17 @@ class FsmFileSender implements Runnable {
                 ia = InetAddress.getByName("10.179.13.224");
             }
 
-
             DatagramSocket receiverSocket = new DatagramSocket(9000);
             FileInputStream fis = new FileInputStream(file);
             BufferedInputStream bis = new BufferedInputStream(fis);
 
             while (true) {
                 DatagramSocket socket = new DatagramSocket();
+
                 if (currentState.equals(State.WAIT_0) || currentState.equals(State.WAIT_1)) {
+
                     if (nameNotSend) {
-                        System.out.println("First send the Name");
                         CRC32 checksum = new CRC32();
-                        byte[] nameByte = new byte[1200];
                         int n = dataName.length();
                         int nameByteLength = 0;
                         for (int i = 0; i < n; i++) {
@@ -108,25 +109,26 @@ class FsmFileSender implements Runnable {
                         byte packetData[] = byteOut.toByteArray();
                         sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
                         nameNotSend = false;
+
                     } else {
-                        System.out.println("send data, no name");
                         int bytesAmount = 0;
                         if ((bytesAmount = bis.read(data, 0, 1200)) > 0) {
-                            System.out.println("bauen ein neues paket");
                             byte packetData[] = buildPacket(currentState, data, bytesAmount);
                             sendPacket = new DatagramPacket(packetData, packetData.length, ia, PORT);
 
                         }else{
-                            System.out.println("WIR SIND AM ENDE DES PAKETES");
-                            System.out.println();
+
                             double endTime = System.currentTimeMillis();
                             double throughputTime = (endTime - startTime)/1000;
                             double sizeMBit = (file.length() * 8) / 1_000_000;
+
                             System.out.println("###########################################################");
                             System.out.println("####  We send "+ file.length() +" byte of data");
                             System.out.println("####  In "+ throughputTime +" seconds");
                             System.out.println("####  So the throughput is "+ sizeMBit/throughputTime+" MBit/s");
                             System.out.println("###########################################################");
+                            System.out.println();
+                            System.out.println("This is the end of the packet");
                             break;
                         }
                     }
@@ -143,7 +145,7 @@ class FsmFileSender implements Runnable {
                         // toDo so bauen das es die richtigen states erkennt
                         int number = 0;
                         boolean correct = false;
-                        byte[] pkt = new byte[9];
+
 
 
                         if(rtt == 0) {
@@ -159,13 +161,8 @@ class FsmFileSender implements Runnable {
 
                         receiverSocket.receive(ackpkt);
 
-
                         receiveTime = System.currentTimeMillis();
                         rtt = (int)(2 * (receiveTime - sendTime) + (rtt/2));
-                        System.out.println("SendTime: " + sendTime);
-                        System.out.println("ReceiveTime: " + receiveTime);
-                        System.out.println("RTT: " + rtt);
-
 
                         if (currentState.equals(State.WAIT_FOR_ACK0)) {
                             number = 0;
@@ -174,14 +171,14 @@ class FsmFileSender implements Runnable {
                         }
                         correct = extractAndCheck(pkt, ackpkt, number);
                         if (correct) {
-                            System.out.println("das paket passt");
+                            System.out.println("The Packet is CORRECT");
                             processMsg(Msg.CORRECT_PACKET, ackpkt, receiverSocket);
                         } else {
-                            System.out.println("das paket passt nicht");
+                            System.out.println("The Packet is CORRUPT");
                             processMsg(Msg.BROKEN_PACKET, ackpkt, receiverSocket);
                         }
                     } catch (SocketTimeoutException ex) {
-                        System.out.println("we caught a timeout");
+                        System.out.println("We caught a timeout");
                         processMsg(Msg.TIMEOUT, sendPacket, socket);
                     }
                 }
@@ -227,9 +224,7 @@ class FsmFileSender implements Runnable {
     class SendPkt extends Transition {
         @Override
         public State execute(Msg input, DatagramPacket packet, DatagramSocket socket) {
-            System.out.println("schicken wir was raus?");
             try {
-
                 socket.send(packet);
                 sendTime = System.currentTimeMillis();
 
@@ -237,16 +232,16 @@ class FsmFileSender implements Runnable {
                 e.printStackTrace();
             }
             if (currentState == State.WAIT_0) {
-                System.out.println("Packet send from wait 0");
+                System.out.println("Packet send from WAIT_0");
                 return State.WAIT_FOR_ACK0;
             } else if (currentState == State.WAIT_FOR_ACK0) {
-                System.out.println("Wait in Ack 0");
+                System.out.println("Wait in ACK_0");
                 return currentState;
             } else if (currentState == State.WAIT_1) {
-                System.out.println("Packet send from wait 1");
+                System.out.println("Packet send from WAIT_1");
                 return State.WAIT_FOR_ACK1;
             } else {
-                System.out.println("Wait in Ack 1");
+                System.out.println("Wait in ACK_1");
                 return currentState;
             }
 
@@ -262,7 +257,6 @@ class FsmFileSender implements Runnable {
             } catch (SocketException e) {
                 e.printStackTrace();
             }
-            System.out.println("Timer wurde gestoppt");
             if (currentState.equals(State.WAIT_FOR_ACK0)) {
                 return State.WAIT_1;
             } else {
@@ -302,21 +296,16 @@ class FsmFileSender implements Runnable {
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(byteOut);
         CRC32 checksum = new CRC32();
-
         checksum.reset();
         checksum.update(data, 0, bytesAmount);
         long checksumValue = checksum.getValue();
-        System.out.println("checksum of send data:" + checksum.getValue());
-        System.out.println(currentState);
+
         if (currentState == State.WAIT_0) {
             out.write(0);
         } else if (currentState == State.WAIT_1) {
             out.write(1);
         }
 
-        for (int i = 0; i < 10; i++) {
-            System.out.println(data[i]);
-        }
         out.writeLong(checksumValue);
         out.writeInt(bytesAmount);
         out.write(data);
@@ -328,14 +317,12 @@ class FsmFileSender implements Runnable {
 
     private boolean extractAndCheck(byte[] data, DatagramPacket packet, int number) throws IOException {
         byte[] numberByte = new byte[1];
-        System.out.println("Start");
         int ack;
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(packet.getData()));
         // Read ACK 0/1
         ack = in.read();
-        System.out.println("ack " + ack);
+
         if (ack != number) {
-            System.out.println("das ack ist leider falsch");
             return false;
         } else {
 
@@ -343,8 +330,6 @@ class FsmFileSender implements Runnable {
             byte[] check = new byte[8];
             for (int i = 0; i < check.length; i++) {
                 check[i] = in.readByte();
-                System.out.println("checksum (for loop) " + check[i]);
-
             }
             ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
             buffer.put(check);
@@ -356,9 +341,6 @@ class FsmFileSender implements Runnable {
 
             ackCheck.reset();
             ackCheck.update(numberByte, 0, 1);
-
-            System.out.println("checksum " + checksum);
-            System.out.println("checker " + ackCheck.getValue());
 
             if (checksum != ackCheck.getValue()) {
                 return false;

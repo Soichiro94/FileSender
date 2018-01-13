@@ -12,6 +12,6 @@ public class Main {
          */
 
 
-        new Thread(new FsmFileSender("test_music.mp3","localhost")).start();
+        new Thread(new FsmFileSender("test_image.jpg","localhost")).start();
     }
 }
