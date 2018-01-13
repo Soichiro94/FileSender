@@ -119,7 +119,7 @@ class FsmFileSender implements Runnable {
                         }else{
                             System.out.println("WIR SIND AM ENDE DES PAKETES");
                             System.out.println();
-                            long endTime = System.currentTimeMillis();
+                            double endTime = System.currentTimeMillis();
                             double throughputTime = (endTime - startTime)/1000;
                             double sizeMBit = (file.length() * 8) / 1_000_000;
                             System.out.println("###########################################################");
